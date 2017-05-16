@@ -5,9 +5,10 @@ package minquery
 import (
 	"errors"
 
+	"reflect"
+
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
-	"reflect"
 )
 
 // DefaultCursorCodec is the default CursorCodec value that is used if none
@@ -44,7 +45,7 @@ type MinQuery interface {
 	// All retrieves all documents from the result set into the provided slice.
 	// cursorFields lists the fields (in order) to be used to generate
 	// the returned cursor.
-	All(result interface{}, cursorFields ...string) (cursor string, err error, hasMore bool)
+	All(result interface{}, order int, cursorFields ...string) (cursor string, err error, hasMore bool)
 }
 
 // testErrValue is the error value returned for testing purposes.
@@ -170,7 +171,7 @@ func allButLast(iter *mgo.Iter, result interface{}) error {
 		i++
 	}
 	if i > 0 {
-		resultv.Elem().Set(slicev.Slice(0, i - 1))
+		resultv.Elem().Set(slicev.Slice(0, i-1))
 	} else {
 		resultv.Elem().Set(slicev.Slice(0, i))
 	}
@@ -178,7 +179,7 @@ func allButLast(iter *mgo.Iter, result interface{}) error {
 }
 
 // All implements MinQuery.All().
-func (mq *minQuery) All(result interface{}, cursorFields ...string) (cursor string, err error, hasMore bool) {
+func (mq *minQuery) All(result interface{}, order int, cursorFields ...string) (cursor string, err error, hasMore bool) {
 	if mq.cursorErr != nil {
 		return "", mq.cursorErr, false
 	}
@@ -208,11 +209,17 @@ func (mq *minQuery) All(result interface{}, cursorFields ...string) (cursor stri
 		cmd = append(cmd, bson.DocElem{Name: "projection", Value: mq.projection})
 	}
 	if mq.min != nil {
-		// min is inclusive, skip the first (which is the previous last)
-		cmd = append(cmd,
-			bson.DocElem{Name: "skip", Value: 1},
-			bson.DocElem{Name: "min", Value: mq.min},
-		)
+		if order < 0 {
+			cmd = append(cmd,
+				bson.DocElem{Name: "max", Value: mq.min},
+			)
+		} else {
+			// min is inclusive, skip the first (which is the previous last)
+			cmd = append(cmd,
+				bson.DocElem{Name: "skip", Value: 1},
+				bson.DocElem{Name: "min", Value: mq.min},
+			)
+		}
 	}
 
 	var res struct {
@@ -241,7 +248,7 @@ func (mq *minQuery) All(result interface{}, cursorFields ...string) (cursor stri
 			}
 			// create cursor from the last document
 			var doc bson.M
-			err = firstBatch[len(firstBatch) - 1 - offset].Unmarshal(&doc)
+			err = firstBatch[len(firstBatch)-1-offset].Unmarshal(&doc)
 			if mq.testError {
 				err = testErrValue
 			}
@@ -276,4 +283,3 @@ func (mq *minQuery) All(result interface{}, cursorFields ...string) (cursor stri
 	}
 	return
 }
-
